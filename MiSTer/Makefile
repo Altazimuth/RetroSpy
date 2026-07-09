@@ -64,7 +64,8 @@ error:
 	$(error Invalid configuration, please check your inputs)
 endif
 
-SOURCEFILES := axbtnmap.c retrospy.c
+SRCDIR := ../MiSter
+SOURCEFILES := $(SRCDIR)/axbtnmap.c $(SRCDIR)/retrospy.c
 EXTERNAL_LIBS := 
 EXTERNAL_LIBS_COPIED := $(foreach lib, $(EXTERNAL_LIBS),$(BINARYDIR)/$(notdir $(lib)))
 
@@ -205,25 +206,25 @@ else
 endif
 
 $(BINARYDIR):
-	mkdir $(BINARYDIR)
+	mkdir -p $(BINARYDIR)
 
 #VisualGDB: FileSpecificTemplates		#<--- VisualGDB will use the following lines to define rules for source files in subdirectories
-$(BINARYDIR)/%.o : %.cpp $(all_make_files) |$(BINARYDIR)
+$(BINARYDIR)/%.o : $(SRCDIR)/%.cpp $(all_make_files) |$(BINARYDIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@ $(CC_DEPENDENCY_FILE_SPECIFIER) $(@:.o=.dep)
 
-$(BINARYDIR)/%.o : %.c $(all_make_files) |$(BINARYDIR)
+$(BINARYDIR)/%.o : $(SRCDIR)/%.c $(all_make_files) |$(BINARYDIR)
 	$(CC) $(CFLAGS) -c $< -o $@ $(CC_DEPENDENCY_FILE_SPECIFIER) $(@:.o=.dep)
 
-$(BINARYDIR)/%.o : %.S $(all_make_files) |$(BINARYDIR)
+$(BINARYDIR)/%.o : $(SRCDIR)/%.S $(all_make_files) |$(BINARYDIR)
 	$(AS) $(ASFLAGS) -c $< -o $@ $(ASM_DEPENDENCY_FILE_SPECIFIER) $(@:.o=.dep)
 
-$(BINARYDIR)/%.o : %.s $(all_make_files) |$(BINARYDIR)
+$(BINARYDIR)/%.o : $(SRCDIR)/%.s $(all_make_files) |$(BINARYDIR)
 	$(AS) $(ASFLAGS) -c $< -o $@ $(ASM_DEPENDENCY_FILE_SPECIFIER) $(@:.o=.dep)
 
-$(BINARYDIR)/%.o : %.cc $(all_make_files) |$(BINARYDIR)
+$(BINARYDIR)/%.o : $(SRCDIR)/%.cc $(all_make_files) |$(BINARYDIR)
 	$(CC) $(CFLAGS) $(CXXFLAGS) -c $< -o $@ $(CC_DEPENDENCY_FILE_SPECIFIER) $(@:.o=.dep)
 
-$(BINARYDIR)/%.o : %.cxx $(all_make_files) |$(BINARYDIR)
-	$(CC) $(CFLAGS) $(CXXFLAGS) -c $< -o $@ $(CC_DEPENDENCY_FILE_SPECIFIER)F $(@:.o=.dep)
+$(BINARYDIR)/%.o : $(SRCDIR)/%.cxx $(all_make_files) |$(BINARYDIR)
+	$(CC) $(CFLAGS) $(CXXFLAGS) -c $< -o $@ $(CC_DEPENDENCY_FILE_SPECIFIER) $(@:.o=.dep)
 
 #VisualGDB: GeneratedRules				#<--- All lines below are auto-generated. Remove this line to suppress auto-generation of file rules.
