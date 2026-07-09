@@ -5,15 +5,17 @@
 BINARYDIR := Debug
 
 #Toolchain
-CC := $(TOOLCHAIN_ROOT)/bin/arm-linux-gnueabihf-gcc.exe
-CXX := $(TOOLCHAIN_ROOT)/bin/arm-linux-gnueabihf-g++.exe
+PREFIX ?= arm-linux-gnueabihf
+CC := $(PREFIX)-gcc
+CXX := $(PREFIX)-g++
 LD := $(CXX)
-AR := $(TOOLCHAIN_ROOT)/bin/arm-linux-gnueabihf-ar.exe
-OBJCOPY := $(TOOLCHAIN_ROOT)/bin/arm-linux-gnueabihf-objcopy.exe
+AR := $(PREFIX)-ar
+OBJCOPY := $(PREFIX)-objcopy
 
 #Additional flags
 PREPROCESSOR_MACROS := DEBUG=1
-INCLUDE_DIRS := C:\MinGW\lib\gcc\mingw32\9.2.0\include $(ToolchainDir)/arm-linux-gnueabihf/libc/usr/include
+INCLUDE_DIRS := 
+#INCLUDE_DIRS := $(TOOLCHAIN_ROOT)/arm-linux-gnueabihf/libc/usr/include
 LIBRARY_DIRS := 
 LIBRARY_NAMES := 
 ADDITIONAL_LINKER_INPUTS := 
@@ -24,13 +26,13 @@ CFLAGS := -ggdb -ffunction-sections -O0
 CXXFLAGS := -ggdb -ffunction-sections -O0
 ASFLAGS := 
 LDFLAGS := -Wl,-gc-sections
-COMMONFLAGS := 
+COMMONFLAGS := -march=armv7-a -mfloat-abi=hard -mfpu=neon
 LINKER_SCRIPT := 
 
 START_GROUP := -Wl,--start-group
 END_GROUP := -Wl,--end-group
 
 #Additional options detected from testing the toolchain
-USE_DEL_TO_CLEAN := 1
+USE_DEL_TO_CLEAN := 0
 CP_NOT_AVAILABLE := 1
 IS_LINUX_PROJECT := 1
