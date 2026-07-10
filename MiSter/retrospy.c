@@ -153,21 +153,28 @@ int main(int argc, char **argv)
 
 		close(fd);
 
-		for (int j = 0; j < 8; ++j)
-			printf("%d", (axes & (1 << j)) != 0);
+		//Packets are encoded as hex values. The server allows lines of up to
+		//1024 chars, meaning we get to work with up to 512B of data this way.
 
-		for (int j = 0; j < 8; ++j)
-			printf("%d", (buttons & (1 << j)) != 0);
+		printf("%02x%02x", axes, buttons);
 
-		for (i = 0; i < buttons; ++i)
+		//Collect buttons into groups of four (one hex char).
+		i = 0;
+		while (i < buttons)
 		{
-			printf(button[i] != 0 ? "1" : "0");
+			unsigned char accum = 0;
+			int start = i;
+			while (i < start + 4 && i < buttons )
+			{
+				accum |= (button[i] != 0) << (i % 4);
+				i++;
+			}
+			printf("%1x", accum);
 		}
 
 		for (i = 0; i < axes; i++)
 		{
-			for (int j = 0; j < sizeof(int) * 8; ++j)
-				printf("%d", (axis[i] & (1 << j)) != 0);
+			printf("%08x", axis[i]);
 		}
 
 		//Probably could reduce the bandwidth by outputing the axes values 

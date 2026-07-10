@@ -9,6 +9,13 @@ namespace RetroSpy.Readers
             "x", "y", "z", "rx", "ry", "rz", "s0", "s1"
         };
 
+
+        private static int ReadPacketChars(byte[] packet, ref int offset, int length)
+        {
+			int ret = Convert.ToInt32(System.Text.Encoding.Default.GetString(packet, offset, length), 16);
+			offset += length;
+            return ret;
+        }
         public static ControllerStateEventArgs? ReadFromPacket(byte[]? packet)
         {
             if (packet == null)
@@ -16,24 +23,19 @@ namespace RetroSpy.Readers
                 throw new ArgumentNullException(nameof(packet));
             }
 
-            if (packet.Length < 16)
+            if (packet.Length < 4)
             {
                 return null;
             }
 
-            int axes = 0;
-            for (byte j = 0; j < 8; ++j)
-            {
-                axes |= (packet[j] == 0x30 ? 0 : 1) << j;
-            }
+            int offset = 0;
 
-            int buttons = 0;
-            for (byte j = 0; j < 8; ++j)
-            {
-                buttons |= (packet[8 + j] == 0x30 ? 0 : 1) << j;
-            }
+			// It's no Base64, but the packets coming in are encoded as hex strings w/ no 0x,
+			// which is 4x more efficient than just '0' or '1', giving 512B instead of 128B to work with.
+			int axes = ReadPacketChars(packet, ref offset, 2);
+			int buttons = ReadPacketChars(packet, ref offset, 2);
 
-            int packetSize = 16 + (axes * 32) + buttons + 1;
+			int packetSize = 4 + (axes * 8) + ((buttons + 3) / 4) + 1;
 
             if (packet.Length != packetSize)
             {
@@ -43,19 +45,21 @@ namespace RetroSpy.Readers
             byte[] buttonValues = new byte[buttons];
             int[] axesValues = new int[axes];
 
-            for (int i = 0; i < buttons; ++i)
+            for (int i = 0; i < buttons;)
             {
-                buttonValues[i] = (byte)((packet[16 + i] == 0x31) ? 1 : 0);
-            }
-
-            for (int i = 0; i < axes; ++i)
-            {
-                axesValues[i] = 0;
-                for (byte j = 0; j < 32; ++j)
+				int accum = ReadPacketChars(packet, ref offset, 1);
+                for (byte j = 0; j < 4 && i < buttons; ++j)
                 {
-                    axesValues[i] |= (packet[16 + buttons + (i * 32) + j] == 0x30 ? 0 : 1) << j;
+                    buttonValues[i] = (byte)((accum >> (i % 4)) & 1);
+                    i++;
                 }
-            }
+			}
+
+
+			for (int i = 0; i < axes; ++i)
+            {
+                axesValues[i] = ReadPacketChars(packet, ref offset, 8);
+			}
 
             ControllerStateBuilder outState = new();
 
