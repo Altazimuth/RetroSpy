@@ -65,7 +65,7 @@ error:
 endif
 
 SRCDIR := ../MiSter
-SOURCEFILES := $(SRCDIR)/axbtnmap.c $(SRCDIR)/retrospy.c
+SOURCEFILES := $(SRCDIR)/axbtnmap.c $(SRCDIR)/joystick.c $(SRCDIR)/retrospy.c
 EXTERNAL_LIBS := 
 EXTERNAL_LIBS_COPIED := $(foreach lib, $(EXTERNAL_LIBS),$(BINARYDIR)/$(notdir $(lib)))
 
