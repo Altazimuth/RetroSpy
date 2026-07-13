@@ -30,12 +30,27 @@ namespace RetroSpy.Readers
 
             int offset = 0;
 
+            // If it ain't prefixed with RS then it's junk and can be ignored.
+			if(System.Text.Encoding.Default.GetString(packet, offset, 2) != "RS")
+            {
+                return null;
+            }
+            offset += 2;
+
+            // If the character S or M follows then the packet is keyboard-related.
+            if(System.Text.Encoding.Default.GetString(packet, offset, 1) == "S" ||
+				System.Text.Encoding.Default.GetString(packet, offset, 1) == "M")
+            {
+                // TODO: HANDLE.
+                return null;
+            }
+
 			// It's no Base64, but the packets coming in are encoded as hex strings w/ no 0x,
 			// which is 4x more efficient than just '0' or '1', giving 512B instead of 128B to work with.
 			int axes = ReadPacketChars(packet, ref offset, 2);
 			int buttons = ReadPacketChars(packet, ref offset, 2);
 
-			int packetSize = 4 + (axes * 8) + ((buttons + 3) / 4) + 1;
+			int packetSize = 2 + 4 + (axes * 8) + ((buttons + 3) / 4) + 1;
 
             if (packet.Length != packetSize)
             {
