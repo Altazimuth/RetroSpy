@@ -22,15 +22,22 @@
   */
 
 #include "joystick.h"
+#include "keyboard.h"
 
 int main(int argc, char **argv)
 {
-	if(joystick_init(argv[argc - 1]) != 0)
+	if (keyboard_init() != 0)
 	{
 		return 1;
 	}
 
-	while (1) {
+	if (joystick_init(argv[argc - 1]) != 0)
+	{
+		return 1;
+	}
+
+	while (1)
+	{
 		joystick_tick(argv[argc - 1]);
 	}
 }

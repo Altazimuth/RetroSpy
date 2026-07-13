@@ -65,7 +65,7 @@ error:
 endif
 
 SRCDIR := ../MiSter
-SOURCEFILES := $(SRCDIR)/axbtnmap.c $(SRCDIR)/joystick.c $(SRCDIR)/retrospy.c
+SOURCEFILES := $(SRCDIR)/axbtnmap.c $(SRCDIR)/joystick.c $(SRCDIR)/keyboard.c $(SRCDIR)/retrospy.c
 EXTERNAL_LIBS := 
 EXTERNAL_LIBS_COPIED := $(foreach lib, $(EXTERNAL_LIBS),$(BINARYDIR)/$(notdir $(lib)))
 
@@ -96,6 +96,7 @@ ifeq ($(GENERATE_MAP_FILE),1)
 LDFLAGS += -Wl,-Map=$(BINARYDIR)/$(basename $(TARGETNAME)).map
 endif
 
+LIBRARY_NAMES += udev
 LIBRARY_LDFLAGS = $(addprefix -l,$(LIBRARY_NAMES))
 
 ifeq ($(IS_LINUX_PROJECT),1)
