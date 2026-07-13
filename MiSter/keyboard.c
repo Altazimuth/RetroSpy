@@ -65,36 +65,23 @@ static int is_hidraw(const struct dirent *dir) {
 	return 1;
 }
 
-int keyboard_init()
+//
+// Collects physical keyboard addresses.
+//
+static int collect_physical_keyboard_addresses(char ***physicalAddressesOut, int *possibleKeyboardsOut)
 {
-	static char buffer[2048];
-	static char command[256];
+	char buffer[2048] = {0};
 
-	int fd, i, j;
-	FILE *fp;
-	struct dirent **namelist;
-	struct dirent *dir;
-	int eventDevices = 0;
-	int hidrawDevices = 0;
 	struct udev *ud = udev_new();
 
+	struct dirent **namelist;
+	int eventDevices = scandir("/dev/input", &namelist, is_eventx, NULL);
+
 	int possibleKeyboards = 0;
-	char **physicalAddresses;
+	char **physicalAddresses = malloc(sizeof(*physicalAddresses) * eventDevices); // Overallocate, then shrink later.
 
-	int matchedKeyboards = 0;
-	char **hidrawPaths;
-
-	if(!ud) {
-		return 1;
-	}
-
-	eventDevices = scandir("/dev/input", &namelist, is_eventx, NULL);
-
-	physicalAddresses = malloc(sizeof(*physicalAddresses) * eventDevices); // Overallocate, then shrink later.
-
-	for (i = 0; i < eventDevices; i++) {
+	for (int i = 0; i < eventDevices; i++) {
 		struct udev_device *device;
-		size_t addressLength;
 
 		snprintf(buffer, sizeof(buffer) - 1, "/dev/input/%s", namelist[i]->d_name);
 		//printf("Device: %s\n", buffer);
@@ -118,7 +105,7 @@ int keyboard_init()
 		snprintf(buffer, sizeof(buffer) - 1, "%s/device/uevent", udev_device_get_syspath(device));
 		//printf(" - File: %s\n", buffer);
 
-		fp = fopen(buffer, "r");
+		FILE *fp = fopen(buffer, "r");
 		if(!fp) {
 			continue;
 		}
@@ -140,7 +127,7 @@ int keyboard_init()
 					physicalAddress++;
 				}
 
-				addressLength = MIN(strlen(physicalAddress) + 1, PATH_MAX + 1);
+				const size_t addressLength = MIN(strlen(physicalAddress) + 1, PATH_MAX + 1);
 				physicalAddresses[possibleKeyboards] = malloc(addressLength);
 
 				strncpy(physicalAddresses[possibleKeyboards], physicalAddress, addressLength - 1);
@@ -154,28 +141,44 @@ int keyboard_init()
 		fclose(fp);
 	}
 
-	for (i = 0; i < eventDevices; i++) {
+	for (int i = 0; i < eventDevices; i++) {
 		free(namelist[i]);
 	}
 	free(namelist);
 
+	*possibleKeyboardsOut = possibleKeyboards;
+
 	if (possibleKeyboards) {
 		physicalAddresses = realloc(physicalAddresses, sizeof(*physicalAddresses) * possibleKeyboards);
 	} else {
+		// Don't need to assign to *physicalAddressesOut since we should bail out from further KB work.
 		free(physicalAddresses);
 		return 1;
 	}
 
-	//printf("\n");
+	*physicalAddressesOut = physicalAddresses;
 
-	hidrawDevices = scandir("/dev/", &namelist, is_hidraw, NULL);
+	return 0;
+}
 
-	hidrawPaths = malloc(sizeof(*hidrawPaths) * possibleKeyboards); // Overallocate, then shrink later.
+//
+// Takes in the physical addresses and quantity of them, and tries to find matching hidraw devices.
+//
+static int find_matching_hidraw_devices(char **physicalAddresses, int possibleKeyboards, char ***hidrawPathsOut, int *matchedKeyboardsOut)
+{
+	char buffer[2048] = {0};
 
-	for (i = 0; i < hidrawDevices; i++) {
+	struct dirent **namelist;
+
+	int hidrawDevices = scandir("/dev/", &namelist, is_hidraw, NULL);
+
+	int matchedKeyboards = 0;
+	char **hidrawPaths = malloc(sizeof(*hidrawPaths) * possibleKeyboards); // Overallocate, then shrink later.
+
+	for (int i = 0; i < hidrawDevices; i++) {
 		snprintf(buffer, sizeof(buffer) - 1, "/sys/class/hidraw/%s/device/uevent", namelist[i]->d_name);
 		//printf("Device: %s\n", buffer);
-		fp = fopen(buffer, "r");
+		FILE *fp = fopen(buffer, "r");
 		if (!fp) {
 			// TODO: Remove from list.
 			continue;
@@ -190,7 +193,7 @@ int keyboard_init()
 				}
 
 				char *physicalAddress = line + 9;
-				for (j = 0; j < possibleKeyboards; j++) {
+				for (int j = 0; j < possibleKeyboards; j++) {
 					if (strncmp(physicalAddresses[j], physicalAddress, strlen(physicalAddresses[j])) == 0) {
 						//printf(" - File: %s\n", physicalAddress);
 						size_t pathLength = MIN(strlen(buffer) + 1, PATH_MAX + 1);
@@ -209,16 +212,18 @@ int keyboard_init()
 		fclose(fp);
 	}
 
-	for (i = 0; i < hidrawDevices; i++) {
+	for (int i = 0; i < hidrawDevices; i++) {
 		free(namelist[i]);
 	}
 	free(namelist);
 
 	// We're done with the physical keyboard addresses.
-	for (i = 0; i < possibleKeyboards; i++) {
+	for (int i = 0; i < possibleKeyboards; i++) {
 		free(physicalAddresses[i]);
 	}
 	free(physicalAddresses);
+
+	*matchedKeyboardsOut = matchedKeyboards;
 
 	if (matchedKeyboards) {
 		hidrawPaths = realloc(hidrawPaths, sizeof(*hidrawPaths) * matchedKeyboards);
@@ -227,8 +232,31 @@ int keyboard_init()
 		return 1;
 	}
 
+	*hidrawPathsOut = hidrawPaths;
+
+	return 0;
+}
+
+int keyboard_init()
+{
+	int possibleKeyboards = 0;
+	char **physicalAddresses = NULL;
+	if(collect_physical_keyboard_addresses(&physicalAddresses, &possibleKeyboards)) {
+		return 1;
+	}
+
+	//printf("\n");
+
+	int matchedKeyboards = 0;
+	char **hidrawPaths = NULL;
+	if(find_matching_hidraw_devices(physicalAddresses, possibleKeyboards, &hidrawPaths, &matchedKeyboards)) {
+		return 1;
+	}
+
+
+
 	printf("Matched Keyboard Paths:\n");
-	for (i = 0; i < matchedKeyboards; i++) {
+	for (int i = 0; i < matchedKeyboards; i++) {
 		printf(" - %s\n", hidrawPaths[i]);
 	}
 
@@ -236,7 +264,7 @@ int keyboard_init()
 
 	int openEventFiles = 0;
 	int *eventFiles = malloc(matchedKeyboards * sizeof(*eventFiles));
-	for (i = 0; i < matchedKeyboards; i++) {
+	for (int i = 0; i < matchedKeyboards; i++) {
 		if((eventFiles[openEventFiles] = open(hidrawPaths[i], O_RDONLY|O_NONBLOCK)) >= 0) {
 			openEventFiles++;
 		}
@@ -249,11 +277,7 @@ int keyboard_init()
 	unsigned char currScancodes[256];
 	unsigned char currModifiers[8];
 	while(1) {
-		for (i = 0; i < openEventFiles; i++) {
-			if(eventFiles[i] == (size_t)-1) {
-				continue;
-			}
-
+		for (int i = 0; i < openEventFiles; i++) {
 			unsigned char events[1024];
 
 			// IMPORTANT: USB HID keyboards start with a byte of modifiers, a reserved byte, then scancodes.
@@ -284,7 +308,7 @@ int keyboard_init()
 					currScancodes[events[currByte]] = 1;
 				}
 
-				for (j = 1; j < 256; j++) {
+				for (int j = 1; j < 256; j++) {
 					if (lastScancodes[i][j] != currScancodes[j]) {
 						printf("%s: %d->%d. ", SCANCODE_NAMES[j], lastScancodes[i][j], currScancodes[j]);
 						lastScancodes[i][j] = currScancodes[j];
@@ -299,13 +323,13 @@ int keyboard_init()
 		}
 	}
 
-	for (i = 0; i < openEventFiles; i++) {
+	for (int i = 0; i < openEventFiles; i++) {
 		close(eventFiles[i]);
 	}
 	free(eventFiles);
 
 	// We're done with the matched keyboard paths
-	for (i = 0; i < matchedKeyboards; i++) {
+	for (int i = 0; i < matchedKeyboards; i++) {
 		free(hidrawPaths[i]);
 	}
 	free(hidrawPaths);
