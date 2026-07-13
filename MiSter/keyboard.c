@@ -271,9 +271,9 @@ int keyboard_init()
 	}
 	eventFiles = realloc(eventFiles, openEventFiles * sizeof(*eventFiles));
 
-	// TODO: I think if poll or select are used then we don't have to keep these handles open constantly?
-	//       May be a decent idea to try pull off.
 	unsigned char **lastScancodes = calloc(openEventFiles, sizeof(char *));
+	unsigned char **lastModifiers = calloc(openEventFiles, sizeof(char *));
+	unsigned char *eventReceived = calloc(openEventFiles, 1); // Used to discard initial keyboard state.
 	unsigned char currScancodes[256];
 	unsigned char currModifiers[8];
 	while(1) {
@@ -287,11 +287,13 @@ int keyboard_init()
 			if ((count = read(eventFiles[i], events, sizeof(events))) < 0) {
 				if (!lastScancodes[i]) {
 					lastScancodes[i] = calloc(256, 1);
+					lastModifiers[i] = calloc(8, 1);
 				}
 				continue;
 			}
 
 			memset(currScancodes, 0, sizeof(currScancodes));
+			memset(currModifiers, 0, sizeof(currModifiers));
 
 			if (count > 0) {
 				int change = 0;
@@ -301,7 +303,27 @@ int keyboard_init()
 					for (ssize_t currByte = 2; currByte < count; currByte++) {
 						lastScancodes[i][events[currByte]] = 1;
 					}
+
+					lastModifiers[i] = calloc(8, 1);
+					if (count > 1) {
+						for (int j = 0; j < 8; j++) {
+							currModifiers[j] = ((events[0] >> j) & 1);
+						}
+					}
+
+					eventReceived[i] = 1;
 					continue;
+				}
+
+				for (int j = 0; j < 8; j++) {
+					currModifiers[j] = ((events[0] >> j) & 1);
+					if (lastModifiers[i][j] != currModifiers[j]) {
+						if (eventReceived[i]) {
+							printf("%s: %d->%d. ", MODIFIER_NAMES[j], lastModifiers[i][j], currModifiers[j]);
+						}
+						lastModifiers[i][j] = currModifiers[j];
+						change = 1;
+					}
 				}
 
 				for (ssize_t currByte = 2; currByte < count; currByte++) {
@@ -310,14 +332,20 @@ int keyboard_init()
 
 				for (int j = 1; j < 256; j++) {
 					if (lastScancodes[i][j] != currScancodes[j]) {
-						printf("%s: %d->%d. ", SCANCODE_NAMES[j], lastScancodes[i][j], currScancodes[j]);
+						if (eventReceived[i]) {
+							printf("%s: %d->%d. ", SCANCODE_NAMES[j], lastScancodes[i][j], currScancodes[j]);
+						}
 						lastScancodes[i][j] = currScancodes[j];
 						change = 1;
 					}
 				}
 
 				if (change) {
-					printf("\n");
+					if (eventReceived[i]) {
+						printf("\n");
+					} else {
+						eventReceived[i] = 1;
+					}
 				}
 			}
 		}

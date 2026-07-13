@@ -12,6 +12,10 @@
 #define KMOD_RALT   0x40
 #define KMOD_RMETA  0x80
 
+static const char *MODIFIER_NAMES[8] = {
+	"LCTRL", "LSHIFT", "LALT", "LMETA", "RCTRL", "RSHIFT", "RALT", "RMETA",
+};
+
 // Scancodes!
 // Based on HID Usage Tables Version 1.12: https://www.usb.org/sites/default/files/documents/hut1_12v2.pdf
 #define KEY_RESERVED            0x00
