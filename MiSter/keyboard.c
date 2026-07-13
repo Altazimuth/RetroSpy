@@ -34,6 +34,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/select.h>
 #include <sys/stat.h>
 
 #include <unistd.h>
@@ -69,24 +70,11 @@ static struct udev_device *find_device(struct udev *ud, const char *path)
 	return udev_device_new_from_devnum(ud, type, statbuf.st_rdev);
 }
 
+//
+// Accept dirents that start with "event".
+//
 static int is_eventx(const struct dirent *dir) {
-	int fd;
-
-	if (strncmp(dir->d_name, "event", 5)) {
-		return 0;
-	}
-
-	return 1;
-}
-
-static int is_hidraw(const struct dirent *dir) {
-	int fd;
-
-	if (strncmp(dir->d_name, "hidraw", 6)) {
-		return 0;
-	}
-
-	return 1;
+	return strncmp(dir->d_name, "event", 5) ? 0 : 1;
 }
 
 //
@@ -190,6 +178,13 @@ static int collect_physical_keyboard_addresses(char ***physicalAddressesOut, int
 }
 
 //
+// Accept dirents that start with "hidraw".
+//
+static int is_hidraw(const struct dirent *dir) {
+	return strncmp(dir->d_name, "hidraw", 6) ? 0 : 1;
+}
+
+//
 // Takes in the physical addresses and quantity of them, and tries to find matching hidraw devices.
 // Adapted from MiSTer_SAM's MiSTer_SAM_MCP.
 // https://github.com/mrchrisster/MiSTer_SAM/
@@ -285,8 +280,6 @@ int keyboard_init()
 		return 1;
 	}
 
-
-
 	printf("Matched Keyboard Paths:\n");
 	for (int i = 0; i < matchedKeyboards; i++) {
 		printf(" - %s\n", hidrawPaths[i]);
@@ -303,56 +296,75 @@ int keyboard_init()
 	}
 	eventFiles = realloc(eventFiles, openEventFiles * sizeof(*eventFiles));
 
+	// We're done with the matched keyboard paths.
+	for (int i = 0; i < matchedKeyboards; i++) {
+		free(hidrawPaths[i]);
+	}
+	free(hidrawPaths);
+
 	unsigned char **lastScancodes = calloc(openEventFiles, sizeof(char *));
 	unsigned char **lastModifiers = calloc(openEventFiles, sizeof(char *));
-	unsigned char *eventReceived = calloc(openEventFiles, 1); // Used to discard initial keyboard state.
-	unsigned char currScancodes[256];
-	unsigned char currModifiers[8];
-	while(1) {
+
+	// Give each device a bit of time to try get nonzero initial state.
+	for (int i = 0; i < openEventFiles; i++) {
+		lastScancodes[i] = calloc(256, 1);
+		lastModifiers[i] = calloc(8, 1);
+
+		{
+			fd_set set;
+			struct timeval timeout;
+			int rv;
+
+			FD_ZERO(&set);
+			FD_SET(eventFiles[i], &set);
+			timeout.tv_sec = 0;
+			timeout.tv_usec = 50 * 1000; // 50ms.
+
+			rv = select(eventFiles[i] + 1, &set, NULL, NULL, &timeout);
+			if(rv == -1 || rv == 0) {
+				// Error or timed out.
+				continue;
+			}
+		}
+
+		unsigned char events[1024];
+		ssize_t count = 0;
+		if ((count = read(eventFiles[i], events, sizeof(events))) < 0) {
+			continue;
+		}
+
+		for (ssize_t currByte = 2; currByte < count; currByte++) {
+			lastScancodes[i][events[currByte]] = 1;
+		}
+
+		if (count > 1) {
+			for (int j = 0; j < 8; j++) {
+				lastModifiers[i][j] = ((events[0] >> j) & 1);
+			}
+		}
+	}
+
+	while(1) {		
 		for (int i = 0; i < openEventFiles; i++) {
 			unsigned char events[1024];
+			unsigned char currScancodes[256] = {0};
+			unsigned char currModifiers[8] = {0};
 
 			// IMPORTANT: USB HID keyboards start with a byte of modifiers, a reserved byte, then scancodes.
 
 			int event = 0;
 			ssize_t count = 0;
 			if ((count = read(eventFiles[i], events, sizeof(events))) < 0) {
-				if (!lastScancodes[i]) {
-					lastScancodes[i] = calloc(256, 1);
-					lastModifiers[i] = calloc(8, 1);
-				}
 				continue;
 			}
-
-			memset(currScancodes, 0, sizeof(currScancodes));
-			memset(currModifiers, 0, sizeof(currModifiers));
 
 			if (count > 0) {
 				int change = 0;
 
-				if (!lastScancodes[i]) {
-					lastScancodes[i] = calloc(256, 1);
-					for (ssize_t currByte = 2; currByte < count; currByte++) {
-						lastScancodes[i][events[currByte]] = 1;
-					}
-
-					lastModifiers[i] = calloc(8, 1);
-					if (count > 1) {
-						for (int j = 0; j < 8; j++) {
-							currModifiers[j] = ((events[0] >> j) & 1);
-						}
-					}
-
-					eventReceived[i] = 1;
-					continue;
-				}
-
 				for (int j = 0; j < 8; j++) {
 					currModifiers[j] = ((events[0] >> j) & 1);
 					if (lastModifiers[i][j] != currModifiers[j]) {
-						if (eventReceived[i]) {
-							printf("%s: %d->%d. ", MODIFIER_NAMES[j], lastModifiers[i][j], currModifiers[j]);
-						}
+						printf("%s: %d->%d. ", MODIFIER_NAMES[j], lastModifiers[i][j], currModifiers[j]);
 						lastModifiers[i][j] = currModifiers[j];
 						change = 1;
 					}
@@ -360,24 +372,20 @@ int keyboard_init()
 
 				for (ssize_t currByte = 2; currByte < count; currByte++) {
 					currScancodes[events[currByte]] = 1;
+					// TODO: It seems like scancodes are on a stack.
+					//       Could we break once we encounter 0 (after second byte)?
 				}
 
 				for (int j = 1; j < 256; j++) {
 					if (lastScancodes[i][j] != currScancodes[j]) {
-						if (eventReceived[i]) {
-							printf("%s: %d->%d. ", SCANCODE_NAMES[j], lastScancodes[i][j], currScancodes[j]);
-						}
+						printf("%s: %d->%d. ", SCANCODE_NAMES[j], lastScancodes[i][j], currScancodes[j]);
 						lastScancodes[i][j] = currScancodes[j];
 						change = 1;
 					}
 				}
 
 				if (change) {
-					if (eventReceived[i]) {
-						printf("\n");
-					} else {
-						eventReceived[i] = 1;
-					}
+					printf("\n");
 				}
 			}
 		}
@@ -387,12 +395,6 @@ int keyboard_init()
 		close(eventFiles[i]);
 	}
 	free(eventFiles);
-
-	// We're done with the matched keyboard paths
-	for (int i = 0; i < matchedKeyboards; i++) {
-		free(hidrawPaths[i]);
-	}
-	free(hidrawPaths);
 
 	// TODO: Return 0 after we're done testing.
 	return 1;
