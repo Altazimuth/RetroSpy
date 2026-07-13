@@ -1,30 +1,54 @@
-// TODO: Proper copyright. Credit for MiSTer_SAM.
+ /*
+ * keyboard.c Version 1.0
+ *
+ * Copyright (c) 2026 Max Waine
+ * Copyright (c) 2026 RetroSpy Technologies
+ *
+ * find_device is taken from udevadm-util.c.
+ * collect_physical_keyboard_addresses, and find_matching_hidraw_devices are
+ * based on code from MiSTer_SAM's MiSTer_SAM_MCP.
+ * Please see those functions below for their copyright notices.
+ */
+ 
+ /*
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 3 of the License, or
+  * (at your option) any later version.
+  *
+  * This program is distributed in the hope that it will be useful,
+  * but WITHOUT ANY WARRANTY; without even the implied warranty of
+  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  * GNU General Public License for more details.
+  *
+  * You should have received a copy of the GNU General Public License
+  * along with this program; if not, write to the Free Software
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+  * 02110-1301 USA.
+  */
+
 
 #include <stdio.h>
-#include <dirent.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include <libudev.h>
-#include <errno.h>
-#include <sys/ioctl.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 
 #include <unistd.h>
-#include <fcntl.h>
-
 #include <linux/limits.h>
-//#include <linux/input.h>
 #include <linux/hidraw.h>
+
+#include <libudev.h>
 
 #include "usb_hid_scancodes.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-// TODO: More effort on this comment.
+// Taken from udevadm-util.c
 // Copyright (C) 2008-2009 Kay Sievers <kay@vrfy.org>
-// GPLv2
-// udevadm-util.c
+// Used under terms of the GPLv2+.
 static struct udev_device *find_device(struct udev *ud, const char *path)
 {
 	struct stat statbuf;
@@ -67,6 +91,10 @@ static int is_hidraw(const struct dirent *dir) {
 
 //
 // Collects physical keyboard addresses.
+// Adapted from MiSTer_SAM's MiSTer_SAM_MCP.
+// https://github.com/mrchrisster/MiSTer_SAM/
+// Copyright (c) 2023 by mrchrisster and Mellified
+// Used under terms of the GPLv3+ (see copyright notice at top of file).
 //
 static int collect_physical_keyboard_addresses(char ***physicalAddressesOut, int *possibleKeyboardsOut)
 {
@@ -163,6 +191,10 @@ static int collect_physical_keyboard_addresses(char ***physicalAddressesOut, int
 
 //
 // Takes in the physical addresses and quantity of them, and tries to find matching hidraw devices.
+// Adapted from MiSTer_SAM's MiSTer_SAM_MCP.
+// https://github.com/mrchrisster/MiSTer_SAM/
+// Copyright (c) 2023 by mrchrisster and Mellified
+// Used under terms of the GPLv3+ (see copyright notice at top of file).
 //
 static int find_matching_hidraw_devices(char **physicalAddresses, int possibleKeyboards, char ***hidrawPathsOut, int *matchedKeyboardsOut)
 {
