@@ -36,6 +36,7 @@
 #include <fcntl.h>
 #include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 
 #include <unistd.h>
 #include <linux/limits.h>
@@ -46,6 +47,12 @@
 #include "usb_hid_scancodes.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+static int openEventFiles = 0;
+static int *eventFiles = NULL;
+
+static unsigned char **lastScancodes = NULL;
+static unsigned char **lastModifiers = NULL;
 
 // Taken from udevadm-util.c
 // Copyright (C) 2008-2009 Kay Sievers <kay@vrfy.org>
@@ -108,12 +115,12 @@ static int collect_physical_keyboard_addresses(char ***physicalAddressesOut, int
 		}
 
 		const char *kb = udev_device_get_property_value(device, "ID_INPUT_KEYBOARD");
-		if(!kb || !*kb || *kb != '1') {
+		if (!kb || !*kb || *kb != '1') {
 			continue;
 		}
 
 		const char *dp = udev_device_get_property_value(device, "DEVPATH");
-		if(dp && *dp && strstr(dp, "/virtual/")) {
+		if (dp && *dp && strstr(dp, "/virtual/")) {
 			continue;
 		}
 
@@ -122,12 +129,12 @@ static int collect_physical_keyboard_addresses(char ***physicalAddressesOut, int
 		//printf(" - File: %s\n", buffer);
 
 		FILE *fp = fopen(buffer, "r");
-		if(!fp) {
+		if (!fp) {
 			continue;
 		}
 
 		size_t n = 0;
-		for(char *line = NULL; getline(&line, &n, fp) != -1 && line; line = NULL) {
+		for (char *line = NULL; getline(&line, &n, fp) != -1 && line; line = NULL) {
 			size_t lineLength = strlen(line);
 			if (lineLength > 5 && strncmp(line, "PHYS", 4) == 0) {
 				if (line[lineLength - 1] == '\n') {
@@ -215,7 +222,7 @@ static int find_matching_hidraw_devices(char **physicalAddresses, int possibleKe
 		for (char *line = NULL; getline(&line, &n, fp) != -1 && line; line = NULL) {
 			size_t lineLength = strlen(line);
 			if (lineLength > 9 && strncmp(line, "HID_PHYS", 8) == 0) {
-				if(line[lineLength - 1] == '\n') {
+				if (line[lineLength - 1] == '\n') {
 					line[lineLength - 1] = 0;
 				}
 
@@ -268,7 +275,7 @@ int keyboard_init()
 {
 	int possibleKeyboards = 0;
 	char **physicalAddresses = NULL;
-	if(collect_physical_keyboard_addresses(&physicalAddresses, &possibleKeyboards)) {
+	if (collect_physical_keyboard_addresses(&physicalAddresses, &possibleKeyboards)) {
 		return 1;
 	}
 
@@ -276,7 +283,7 @@ int keyboard_init()
 
 	int matchedKeyboards = 0;
 	char **hidrawPaths = NULL;
-	if(find_matching_hidraw_devices(physicalAddresses, possibleKeyboards, &hidrawPaths, &matchedKeyboards)) {
+	if (find_matching_hidraw_devices(physicalAddresses, possibleKeyboards, &hidrawPaths, &matchedKeyboards)) {
 		return 1;
 	}
 
@@ -287,11 +294,42 @@ int keyboard_init()
 
 	// TODO: Only select a single keyboard?
 
-	int openEventFiles = 0;
-	int *eventFiles = malloc(matchedKeyboards * sizeof(*eventFiles));
+	openEventFiles = 0;
+	eventFiles = malloc(matchedKeyboards * sizeof(*eventFiles));
 	for (int i = 0; i < matchedKeyboards; i++) {
-		if((eventFiles[openEventFiles] = open(hidrawPaths[i], O_RDONLY|O_NONBLOCK)) >= 0) {
-			openEventFiles++;
+		if ((eventFiles[openEventFiles] = open(hidrawPaths[i], O_RDONLY|O_NONBLOCK)) >= 0) {
+			struct hidraw_report_descriptor desc;
+			ioctl(eventFiles[openEventFiles], HIDIOCGRDESCSIZE, &desc.size);
+			ioctl(eventFiles[openEventFiles], HIDIOCGRDESC, &desc);
+
+			// EXTREMELY bootleg HID descriptor parsing.
+			int offset = 0;
+			int collectionCount = 0;
+			int success = 0;
+			while (offset < desc.size) {
+				const unsigned char dataLength = desc.value[offset] & 0x03;
+				if (dataLength == 1) {
+					if (offset < desc.size) {
+						if (desc.value[offset] == 0xA1 && desc.value[offset + 1] == 0x01) {
+							// Forbid devices with >1 application collection.
+							collectionCount++;
+							if (collectionCount > 1) {
+								close(eventFiles[openEventFiles]);
+								success = 0;
+								break;
+							}
+						} else if(desc.value[offset] == 0x05 && desc.value[offset + 1] != 0x07) {
+							// If we encounted the keyboard/keypad page then we should be good.
+							success = 1;
+						}
+					}
+				}
+				offset += dataLength + 1;
+			}
+
+			if (success) {
+				openEventFiles++;
+			}
 		}
 	}
 	eventFiles = realloc(eventFiles, openEventFiles * sizeof(*eventFiles));
@@ -302,8 +340,8 @@ int keyboard_init()
 	}
 	free(hidrawPaths);
 
-	unsigned char **lastScancodes = calloc(openEventFiles, sizeof(char *));
-	unsigned char **lastModifiers = calloc(openEventFiles, sizeof(char *));
+	lastScancodes = calloc(openEventFiles, sizeof(char *));
+	lastModifiers = calloc(openEventFiles, sizeof(char *));
 
 	// Give each device a bit of time to try get nonzero initial state.
 	for (int i = 0; i < openEventFiles; i++) {
@@ -321,7 +359,7 @@ int keyboard_init()
 			timeout.tv_usec = 50 * 1000; // 50ms.
 
 			rv = select(eventFiles[i] + 1, &set, NULL, NULL, &timeout);
-			if(rv == -1 || rv == 0) {
+			if (rv == -1 || rv == 0) {
 				// Error or timed out.
 				continue;
 			}
@@ -344,58 +382,76 @@ int keyboard_init()
 		}
 	}
 
-	while(1) {		
-		for (int i = 0; i < openEventFiles; i++) {
-			unsigned char events[1024];
-			unsigned char currScancodes[256] = {0};
-			unsigned char currModifiers[8] = {0};
-
-			// IMPORTANT: USB HID keyboards start with a byte of modifiers, a reserved byte, then scancodes.
-
-			int event = 0;
-			ssize_t count = 0;
-			if ((count = read(eventFiles[i], events, sizeof(events))) < 0) {
-				continue;
-			}
-
-			if (count > 0) {
-				int change = 0;
-
-				for (int j = 0; j < 8; j++) {
-					currModifiers[j] = ((events[0] >> j) & 1);
-					if (lastModifiers[i][j] != currModifiers[j]) {
-						printf("%s: %d->%d. ", MODIFIER_NAMES[j], lastModifiers[i][j], currModifiers[j]);
-						lastModifiers[i][j] = currModifiers[j];
-						change = 1;
-					}
-				}
-
-				for (ssize_t currByte = 2; currByte < count; currByte++) {
-					currScancodes[events[currByte]] = 1;
-					// TODO: It seems like scancodes are on a stack.
-					//       Could we break once we encounter 0 (after second byte)?
-				}
-
-				for (int j = 1; j < 256; j++) {
-					if (lastScancodes[i][j] != currScancodes[j]) {
-						printf("%s: %d->%d. ", SCANCODE_NAMES[j], lastScancodes[i][j], currScancodes[j]);
-						lastScancodes[i][j] = currScancodes[j];
-						change = 1;
-					}
-				}
-
-				if (change) {
-					printf("\n");
-				}
-			}
-		}
-	}
-
+#if 0
 	for (int i = 0; i < openEventFiles; i++) {
 		close(eventFiles[i]);
 	}
 	free(eventFiles);
+#endif
 
-	// TODO: Return 0 after we're done testing.
-	return 1;
+	return 0;
+}
+
+int keyboard_tick()
+{
+	for (int i = 0; i < openEventFiles; i++) {
+		unsigned char events[1024];
+		unsigned char currScancodes[256] = {0};
+		unsigned char currModifiers[8] = {0};
+
+		// IMPORTANT: USB HID keyboards start with a byte of modifiers, a reserved byte, then scancodes.
+
+		int event = 0;
+		ssize_t count = 0;
+		if ((count = read(eventFiles[i], events, sizeof(events))) < 0) {
+			continue;
+		}
+
+		if (count > 0) {
+			int changeModifiers = 0;
+			int changeScancodes = 0;
+
+			for (int j = 0; j < 8; j++) {
+				currModifiers[j] = ((events[0] >> j) & 1);
+				if (lastModifiers[i][j] != currModifiers[j]) {
+					//printf("%s: %d->%d. ", MODIFIER_NAMES[j], lastModifiers[i][j], currModifiers[j]);
+					if (!changeModifiers) {
+						printf("RS");
+						printf("M"); // M flags that modifiers follow.
+					}
+					printf("%1x", (currModifiers[j] << 3) | j); // MSB for on/off, 3 bits for modifier.
+					lastModifiers[i][j] = currModifiers[j];
+					changeModifiers = 1;
+				}
+			}
+
+			for (ssize_t currByte = 2; currByte < count; currByte++) {
+				currScancodes[events[currByte]] = 1;
+				// TODO: It seems like scancodes are on a stack.
+				//       Could we break once we encounter 0 (after second byte)?
+			}
+
+			changeScancodes = 0;
+			for (int j = 1; j < 256; j++) {
+				if (lastScancodes[i][j] != currScancodes[j]) {
+					//printf("%s: %d->%d. ", SCANCODE_NAMES[j], lastScancodes[i][j], currScancodes[j]);
+					if (!changeScancodes) {
+						if (!changeModifiers) {
+							printf("RS");
+						}
+						printf("S"); // S flags that scancodes follow.
+					}
+					printf("%02x%x", j, currScancodes[j]); // 2 hex for scancode value then 1 char for on/off.
+					lastScancodes[i][j] = currScancodes[j];
+					changeScancodes = 1;
+				}
+			}
+
+			if (changeModifiers || changeScancodes) {
+				printf("\n");
+			}
+		}
+	}
+
+	return 0;
 }

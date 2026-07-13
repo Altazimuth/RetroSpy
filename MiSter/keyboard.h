@@ -2,6 +2,6 @@
 #define __KEYBOARD_H__
 
 int keyboard_init();
-//int keyboard_tick();
+int keyboard_tick();
 
 #endif

@@ -26,18 +26,24 @@
 
 int main(int argc, char **argv)
 {
-	if (keyboard_init() != 0)
+	if (keyboard_init())
 	{
 		return 1;
 	}
 
-	if (joystick_init(argv[argc - 1]) != 0)
+	if (joystick_init(argv[argc - 1]))
 	{
 		return 1;
 	}
 
 	while (1)
 	{
-		joystick_tick(argv[argc - 1]);
+		if (keyboard_tick()) {
+			break;
+		}
+
+		if (joystick_tick(argv[argc - 1])) {
+			break;
+		}
 	}
 }

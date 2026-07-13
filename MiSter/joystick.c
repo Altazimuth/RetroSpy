@@ -164,6 +164,8 @@ int joystick_tick(const char *filename)
     //Packets are encoded as hex values. The server allows lines of up to
     //1024 chars, meaning we get to work with up to 512B of data this way.
 
+    printf("RS");
+
     printf("%02x%02x", axes, buttons);
 
     //Collect buttons into groups of four (one hex char).
